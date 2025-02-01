@@ -1,0 +1,9 @@
+requests==2.31.0
+numpy==1.24.4
+opencv-python-headless==4.9.0.80
+pillow==10.1.0
+torch==2.1.0
+torchvision==0.16.0
+openvino==2023.2.0
+scikit-image==0.22.0
+pyinstaller==6.2.0  # إضافة لبناء الملف التنفيذي
