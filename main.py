@@ -22,7 +22,7 @@ class TrainedModel:
         start_time = time.time()
 
         # تحميل نموذج OpenVINO ResNet-50
-        model_path = "C:/Users/ccl/Desktop/resnet50.xml"
+        model_path = "./resnet50.xml"  # أو "resnet50.xml" إذا كان الملف في نفس المجلد
         self.core = Core()
         self.model = self.core.read_model(model=model_path)
         self.compiled_model = self.core.compile_model(self.model, device_name="GPU")  # لاستخدام معالج رسومي
