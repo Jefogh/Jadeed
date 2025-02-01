@@ -25,8 +25,12 @@ jobs:
       run: |
         pyinstaller --onefile --windowed --name "CaptchaSolver" main.py
 
+    - name: Create dist directory (if missing)
+      run: |
+        if not exist "dist" mkdir dist
+
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # التحديث إلى v4
       with:
         name: CaptchaSolver-EXE
         path: dist/CaptchaSolver.exe
