@@ -17,20 +17,29 @@ jobs:
       with:
         python-version: '3.10'
 
+    - name: Verify resnet50.xml exists
+      run: |
+        if (-not (Test-Path -Path "resnet50.xml")) {
+          Write-Host "❌ Error: resnet50.xml not found in root directory!"
+          Exit 1
+        }
+
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
 
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name "CaptchaSolver" main.py
+        pyinstaller --onefile --windowed --name "CaptchaSolver" --add-data "resnet50.xml;." main.py
 
-    - name: Create dist directory (if missing)
+    - name: Copy Model File to Dist
       run: |
-        if (-not (Test-Path -Path "dist")) { New-Item -ItemType Directory -Path "dist" }
+        Copy-Item -Path "resnet50.xml" -Destination "dist/resnet50.xml" -Force
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: CaptchaSolver-EXE
-        path: dist/CaptchaSolver.exe
+        name: CaptchaSolver-Package
+        path: |
+          dist/CaptchaSolver.exe
+          dist/resnet50.xml
