@@ -7,25 +7,31 @@ from tkinter import simpledialog, Scrollbar, filedialog, ttk
 import requests
 import cv2
 import numpy as np
-from PIL import Image, ImageTk, ImageChops, ImageOps
+from PIL import Image, ImageTk
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 from torchvision import models
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+
+import time
+import cv2
+import numpy as np
 from openvino.runtime import Core
-import traceback
+from PIL import Image
+
 
 class TrainedModel:
     def __init__(self):
         start_time = time.time()
 
-        # تحميل نموذج OpenVINO ResNet-50
-        model_path = "./resnet50.xml"  # أو "resnet50.xml" إذا كان الملف في نفس المجلد
+        # تحميل نموذج OpenVINO SqueezeNet 1.1 المحول
+        # تأكد من أن الملف "squeezenet1_1.xml" موجود في نفس المجلد أو حدد المسار المناسب له
+        model_path = "squeezenet1_1.xml"
         self.core = Core()
         self.model = self.core.read_model(model=model_path)
-        self.compiled_model = self.core.compile_model(self.model, device_name="GPU")  # لاستخدام معالج رسومي
+        self.compiled_model = self.core.compile_model(self.model, device_name="GPU")  # استخدام GPU إذا كان متاحاً
         self.input_layer = self.compiled_model.input(0)
         self.output_layer = self.compiled_model.output(0)
 
@@ -34,36 +40,43 @@ class TrainedModel:
     def predict(self, img):
         start_time = time.time()
 
-        # تغيير حجم الصورة إلى الحجم المطلوب للنموذج
-        resized_image = cv2.resize(img, (224, 224))  # ResNet-50 يتوقع صور بحجم 224x224
+        # تغيير حجم الصورة إلى الحجم المطلوب للنموذج (224x224 لنموذج SqueezeNet 1.1)
+        resized_image = cv2.resize(img, (224, 224))
         print(f"Image resizing (OpenCV) took {time.time() - start_time:.4f} seconds")
 
-        # معالجة الصورة لتحويلها إلى الإدخال المناسب لـ OpenVINO
-        pil_image = Image.fromarray(cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB))  # تحويل BGR إلى RGB
-        input_image = np.asarray(pil_image).transpose(2, 0, 1).astype(np.float32) / 255.0  # تحويل HWC إلى CHW
-        input_image = (input_image - 0.5) / 0.5  # Normalization
-        input_image = np.expand_dims(input_image, axis=0)  # إضافة بُعد إضافي للإشارة إلى Batch size
+        # معالجة الصورة وتحويلها إلى الإدخال المناسب لـ OpenVINO
+        # تحويل الصورة من BGR (تنسيق OpenCV) إلى RGB ثم إلى PIL Image
+        pil_image = Image.fromarray(cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB))
+        # تحويل PIL Image إلى مصفوفة NumPy، ثم تحويل ترتيب الأبعاد من HWC إلى CHW وتقسيم القيم على 255
+        input_image = np.asarray(pil_image).transpose(2, 0, 1).astype(np.float32) / 255.0
+        # تطبيق التطبيع باستخدام المتوسط والانحراف المعياري (كما في التدريب)
+        input_image = (input_image - 0.485) / 0.229
+        # إضافة بُعد Batch
+        input_image = np.expand_dims(input_image, axis=0)
 
         print(f"Image preprocessing took {time.time() - start_time:.4f} seconds")
 
-        # توقع النموذج
+        # إجراء التنبؤ باستخدام النموذج
         start_time = time.time()
         outputs = self.compiled_model([input_image])[self.output_layer]
         print(f"Model prediction took {time.time() - start_time:.4f} seconds")
 
-        # تقسيم المخرجات لتفسير النتائج
+        # تقسيم المخرجات إلى ثلاث مجموعات:
+        # - أول 10 قيم للتنبؤ بالرقم الأول
+        # - القيم من 10 إلى 12 للتنبؤ بالعملية الحسابية
+        # - القيم من 13 إلى النهاية للتنبؤ بالرقم الثاني
         num1_preds = outputs[:, :10]
         operation_preds = outputs[:, 10:13]
         num2_preds = outputs[:, 13:]
 
-        # استخراج القيم المتوقعة
+        # استخراج الفئة المتوقعة لكل جزء باستخدام np.argmax
         num1_predicted = np.argmax(num1_preds, axis=1)
         operation_predicted = np.argmax(operation_preds, axis=1)
         num2_predicted = np.argmax(num2_preds, axis=1)
 
-        # تعيين العمليات إلى رموزها
+        # تحويل التنبؤ بالعملية الحسابية إلى رمز مناسب
         operation_map = {0: "+", 1: "-", 2: "×"}
-        predicted_operation = operation_map[operation_predicted[0]]
+        predicted_operation = operation_map.get(operation_predicted[0], "?")
 
         return num1_predicted[0], predicted_operation, num2_predicted[0]
 
@@ -286,53 +299,36 @@ class CaptchaApp:
 
     def show_captcha(self, captcha_data, username, captcha_id):
         try:
-            # تدمير إطار الكابتشا القديم إذا كان موجودًا
             if self.captcha_frame:
                 self.captcha_frame.destroy()
-
-            # فك تشفير بيانات الكابتشا من Base64
             captcha_base64 = captcha_data.split(",")[1] if "," in captcha_data else captcha_data
             captcha_image_data = np.frombuffer(base64.b64decode(captcha_base64), dtype=np.uint8)
             captcha_image = cv2.imdecode(captcha_image_data, cv2.IMREAD_COLOR)
-
             if captcha_image is None:
                 print("Failed to decode captcha image from memory.")
                 return
-
-            # معالجة الصورة: إزالة الخلفية
             start_time = time.time()
             processed_image = self.process_captcha(captcha_image)
+            processed_image = cv2.resize(processed_image, (200, 114))
             elapsed_time_bg_removal = time.time() - start_time
-
-            # إجراء التنبؤ مباشرةً بعد معالجة الصورة
+            self.display_captcha_image(processed_image)
             start_time = time.time()
             predictions = self.trained_model.predict(processed_image)
             elapsed_time_prediction = time.time() - start_time
             ocr_output_text = f"{predictions[0]} {predictions[1]} {predictions[2]}"
             print(f"Predicted Operation: {ocr_output_text}")
-
-            # تحديث الإشعارات
             self.update_notification(f"Captcha solved in {elapsed_time_prediction:.2f}s", "green")
             self.update_time_label(
-                f"Background removal: {elapsed_time_bg_removal:.2f}s, Prediction: {elapsed_time_prediction:.2f}s"
-            )
-
-            # عرض الكابتشا المعالجة في الواجهة
-            processed_image = cv2.resize(processed_image, (200, 114))
-            self.display_captcha_image(processed_image)
-
-            # استخراج حل الكابتشا من التنبؤات وإرساله
+                f"Background removal: {elapsed_time_bg_removal:.2f}s, Prediction: {elapsed_time_prediction:.2f}s")
             captcha_solution = self.solve_captcha_from_prediction(predictions)
             if captcha_solution is not None:
                 self.executor.submit(self.submit_captcha, username, captcha_id, captcha_solution)
 
-            # إيقاف الـ Spinner وإخفائه
             self.spinner.stop()
             self.spinner_canvas.pack_forget()
 
         except Exception as e:
-            # التعامل مع الأخطاء
-            self.update_notification(f"Failed to show captcha: {e}", "red")
+            self.update_notification(f"Failed to show captcha: {e}", "red", response.txt)
             self.spinner.stop()
             self.spinner_canvas.pack_forget()
 
@@ -365,60 +361,46 @@ class CaptchaApp:
         captcha_label.grid(row=0, column=0, padx=10, pady=10)
 
     def remove_background_keep_original_colors(self, captcha_image, background_image):
-        try:
-            # قياس الوقت
-            start_time = time.time()
+        # 1. تقليل الدقة لتسريع العملية
+        scale_factor = 0.5
+        captcha_image = cv2.resize(captcha_image, (0, 0), fx=scale_factor, fy=scale_factor)
+        background_image = cv2.resize(background_image, (0, 0), fx=scale_factor, fy=scale_factor)
 
-            # 1. تقليل الدقة لتسريع العملية
-            scale_factor = 0.25
-            captcha_image = cv2.resize(captcha_image, (0, 0), fx=scale_factor, fy=scale_factor)
-            background_image = cv2.resize(background_image, (0, 0), fx=scale_factor, fy=scale_factor)
+        # 2. إذا كان GPU مدعومًا، استخدم CUDA لإزالة الخلفية
+        if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+            captcha_image_gpu = cv2.cuda_GpuMat()
+            background_image_gpu = cv2.cuda_GpuMat()
 
-            # 2. إذا كان GPU مدعومًا، استخدم CUDA لإزالة الخلفية
-            if cv2.cuda.getCudaEnabledDeviceCount() > 0:
-                captcha_image_gpu = cv2.cuda_GpuMat()
-                background_image_gpu = cv2.cuda_GpuMat()
+            captcha_image_gpu.upload(captcha_image)
+            background_image_gpu.upload(background_image)
 
-                captcha_image_gpu.upload(captcha_image)
-                background_image_gpu.upload(background_image)
+            # حساب الفرق بين الصورتين باستخدام GPU
+            diff_gpu = cv2.cuda.absdiff(captcha_image_gpu, background_image_gpu)
+            diff = diff_gpu.download()
 
-                # حساب الفرق بين الصورتين باستخدام GPU
-                diff_gpu = cv2.cuda.absdiff(captcha_image_gpu, background_image_gpu)
-                diff = diff_gpu.download()
+            # تحويل الفرق إلى صورة رمادية
+            gray_gpu = cv2.cuda.cvtColor(diff_gpu, cv2.COLOR_BGR2GRAY)
+            gray = gray_gpu.download()
 
-                # تحويل الفرق إلى صورة رمادية
-                gray_gpu = cv2.cuda.cvtColor(diff_gpu, cv2.COLOR_BGR2GRAY)
-                gray = gray_gpu.download()
+            # تطبيق العتبة (threshold) على الصورة الرمادية
+            _, mask = cv2.threshold(gray, 30, 255, cv2.THRESH_BINARY)
 
-                # تطبيق العتبة (threshold) على الصورة الرمادية
-                _, mask = cv2.threshold(gray, 30, 255, cv2.THRESH_BINARY)
+            # رفع القناع إلى GPU
+            mask_gpu = cv2.cuda_GpuMat()
+            mask_gpu.upload(mask)
 
-                # رفع القناع إلى GPU
-                mask_gpu = cv2.cuda_GpuMat()
-                mask_gpu.upload(mask)
-
-                # إزالة الخلفية مع الحفاظ على الألوان الأصلية باستخدام GPU
-                result_gpu = cv2.cuda.bitwise_and(captcha_image_gpu, captcha_image_gpu, mask=mask_gpu)
-                result = result_gpu.download()
-            else:
-                # إذا لم يكن GPU مدعومًا، نستخدم الطريقة العادية
-                diff = cv2.absdiff(captcha_image, background_image)
-                gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-                _, mask = cv2.threshold(gray, 30, 255, cv2.THRESH_BINARY)
-                result = cv2.bitwise_and(captcha_image, captcha_image, mask=mask)
-
-            # طباعة الوقت المستغرق
-            end_time = time.time()
-            elapsed_time_ms = (end_time - start_time) * 1000  # تحويل إلى ميلي ثانية
-            print(f"Background removal completed in {elapsed_time_ms:.2f} ms")
+            # إزالة الخلفية مع الحفاظ على الألوان الأصلية باستخدام GPU
+            result_gpu = cv2.cuda.bitwise_and(captcha_image_gpu, captcha_image_gpu, mask=mask_gpu)
+            result = result_gpu.download()
 
             return result
-
-        except Exception as e:
-            # طباعة الخطأ
-            print("An error occurred during background removal:")
-            print(traceback.format_exc())  # تفاصيل الخطأ
-            return None
+        else:
+            # إذا لم يكن GPU مدعومًا، نستخدم الطريقة العادية
+            diff = cv2.absdiff(captcha_image, background_image)
+            gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+            _, mask = cv2.threshold(gray, 30, 255, cv2.THRESH_BINARY)
+            result = cv2.bitwise_and(captcha_image, captcha_image, mask=mask)
+            return result
 
     def submit_captcha(self, username, captcha_id, captcha_solution):
         session = self.accounts[username].get("session")
@@ -436,20 +418,21 @@ class CaptchaApp:
     @staticmethod
     def generate_user_agent():
         user_agent_list = [
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (Linux; Android 11; SM-G996B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.210 Mobile Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0",
-            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:88.0) Gecko/20100101 Firefox/88.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_2_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36",
-            "Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.101 Mobile Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.64",
-            "Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.2 Safari/605.1.15",
-            "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:91.0) Gecko/20100101 Firefox/91.0",
-            "Mozilla/5.0 (Linux; Android 9; SAMSUNG SM-A505FN) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.111 Mobile Safari/537.36",
-            "Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.2 Safari/605.1.15",
-            "Mozilla/5.0 (X11; FreeBSD amd64; rv:91.0) Gecko/20100101 Firefox/91.0"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:100.0) Gecko/20100101 Firefox/100.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 12_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 15_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Linux; Android 12; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Mobile Safari/537.36",
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:98.0) Gecko/20100101 Firefox/98.0",
+            "Mozilla/5.0 (iPad; CPU OS 15_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.41 Mobile Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; WOW64; rv:92.0) Gecko/20100101 Firefox/92.0",
+            "Mozilla/5.0 (Linux; Android 9; SAMSUNG SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Mobile Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_6_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.1 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 6.3; WOW64; rv:93.0) Gecko/20100101 Firefox/93.0",
+            "Mozilla/5.0 (Linux; Android 11; Mi 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.210 Mobile Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:96.0) Gecko/20100101 Firefox/96.0"
         ]
 
         return random.choice(user_agent_list)
@@ -594,8 +577,8 @@ class CaptchaApp:
     def create_session(user_agent):
         headers = {
             "User-Agent": user_agent,
-            "Accept": "application/json, text/plain, */*",
             "host": "api.ecsc.gov.sy:8443",
+            "Accept": "application/json, text/plain, */*",
             "Accept-Language": "ar,en-US;q=0.7,en;q=0.3",
             "Referer": "https://ecsc.gov.sy/login",
             "Content-Type": "application/json",
@@ -605,7 +588,7 @@ class CaptchaApp:
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
-            "Priority": "u=2",
+            "Priority": "u=1",
         }
         session = requests.Session()
         session.headers.update(headers)
@@ -614,24 +597,11 @@ class CaptchaApp:
     def login(self, username, password, session, retry_count=3):
         login_url = "https://api.ecsc.gov.sy:8443/secure/auth/login"
         login_data = {"username": username, "password": password}
-
         for attempt in range(retry_count):
             try:
-                # إرسال طلب POST لتسجيل الدخول
                 post_response = session.post(login_url, json=login_data, verify=False)
-
                 if post_response.status_code == 200:
                     self.update_notification("Login successful.", "green", post_response.text)
-
-                    # معالجة ملفات تعريف الارتباط (Cookies)
-                    cookies = post_response.cookies.get_dict()
-                    session.cookies.update(cookies)  # إضافة ملفات تعريف الارتباط إلى الجلسة
-
-                    # تسجيل القيم المستخرجة من الرأس (Headers) إذا لزم الأمر
-                    set_cookie_header = post_response.headers.get("Set-Cookie", "")
-                    if set_cookie_header:
-                        self.update_notification(f"Cookies Received: {set_cookie_header}", "blue")
-
                     return True
                 else:
                     self.update_notification(f"Login failed. Status code: {post_response.status_code}",
