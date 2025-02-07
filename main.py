@@ -26,12 +26,11 @@ class TrainedModel:
     def __init__(self):
         start_time = time.time()
 
-        # تحميل نموذج OpenVINO SqueezeNet 1.1 المحول
-        # تأكد من أن الملف "squeezenet1_1.xml" موجود في نفس المجلد أو حدد المسار المناسب له
-        model_path = "squeezenet1_1.xml"
+        # تحميل نموذج OpenVINO MobileNetV2
+        model_path = "C:/Users/ccl/Desktop/mobilenet_v2.xml"
         self.core = Core()
         self.model = self.core.read_model(model=model_path)
-        self.compiled_model = self.core.compile_model(self.model, device_name="GPU")  # استخدام GPU إذا كان متاحاً
+        self.compiled_model = self.core.compile_model(self.model, device_name="GPU")  # استخدام GPU
         self.input_layer = self.compiled_model.input(0)
         self.output_layer = self.compiled_model.output(0)
 
@@ -40,43 +39,36 @@ class TrainedModel:
     def predict(self, img):
         start_time = time.time()
 
-        # تغيير حجم الصورة إلى الحجم المطلوب للنموذج (224x224 لنموذج SqueezeNet 1.1)
-        resized_image = cv2.resize(img, (224, 224))
+        # تغيير حجم الصورة إلى الحجم المطلوب للنموذج
+        resized_image = cv2.resize(img, (224, 224))  # MobileNetV2 يستخدم 224x224
         print(f"Image resizing (OpenCV) took {time.time() - start_time:.4f} seconds")
 
         # معالجة الصورة وتحويلها إلى الإدخال المناسب لـ OpenVINO
-        # تحويل الصورة من BGR (تنسيق OpenCV) إلى RGB ثم إلى PIL Image
         pil_image = Image.fromarray(cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB))
-        # تحويل PIL Image إلى مصفوفة NumPy، ثم تحويل ترتيب الأبعاد من HWC إلى CHW وتقسيم القيم على 255
-        input_image = np.asarray(pil_image).transpose(2, 0, 1).astype(np.float32) / 255.0
-        # تطبيق التطبيع باستخدام المتوسط والانحراف المعياري (كما في التدريب)
-        input_image = (input_image - 0.485) / 0.229
-        # إضافة بُعد Batch
-        input_image = np.expand_dims(input_image, axis=0)
+        input_image = np.asarray(pil_image).transpose(2, 0, 1).astype(np.float32) / 255.0  # HWC -> CHW
+        input_image = (input_image - 0.485) / 0.229  # Normalization
+        input_image = np.expand_dims(input_image, axis=0)  # إضافة بُعد Batch size
 
         print(f"Image preprocessing took {time.time() - start_time:.4f} seconds")
 
-        # إجراء التنبؤ باستخدام النموذج
+        # توقع النموذج
         start_time = time.time()
         outputs = self.compiled_model([input_image])[self.output_layer]
         print(f"Model prediction took {time.time() - start_time:.4f} seconds")
 
-        # تقسيم المخرجات إلى ثلاث مجموعات:
-        # - أول 10 قيم للتنبؤ بالرقم الأول
-        # - القيم من 10 إلى 12 للتنبؤ بالعملية الحسابية
-        # - القيم من 13 إلى النهاية للتنبؤ بالرقم الثاني
+        # تقسيم المخرجات لتفسير النتائج
         num1_preds = outputs[:, :10]
         operation_preds = outputs[:, 10:13]
         num2_preds = outputs[:, 13:]
 
-        # استخراج الفئة المتوقعة لكل جزء باستخدام np.argmax
+        # استخراج القيم المتوقعة
         num1_predicted = np.argmax(num1_preds, axis=1)
         operation_predicted = np.argmax(operation_preds, axis=1)
         num2_predicted = np.argmax(num2_preds, axis=1)
 
-        # تحويل التنبؤ بالعملية الحسابية إلى رمز مناسب
+        # تعيين العمليات إلى رموزها
         operation_map = {0: "+", 1: "-", 2: "×"}
-        predicted_operation = operation_map.get(operation_predicted[0], "?")
+        predicted_operation = operation_map[operation_predicted[0]]
 
         return num1_predicted[0], predicted_operation, num2_predicted[0]
 
@@ -362,7 +354,7 @@ class CaptchaApp:
 
     def remove_background_keep_original_colors(self, captcha_image, background_image):
         # 1. تقليل الدقة لتسريع العملية
-        scale_factor = 0.5
+        scale_factor = 0.25
         captcha_image = cv2.resize(captcha_image, (0, 0), fx=scale_factor, fy=scale_factor)
         background_image = cv2.resize(background_image, (0, 0), fx=scale_factor, fy=scale_factor)
 
