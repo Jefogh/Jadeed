@@ -26,10 +26,12 @@ class TrainedModel:
     def __init__(self):
         start_time = time.time()
 
-        # تحميل نموذج OpenVINO MobileNetV2
-        model_path = "C:/Users/ccl/Desktop/mobilenet_v2.xml"
+        # تحميل نموذج OpenVINO MobileNetV2 من مسار نسبي مع تضمين ملف الـ BIN
+        model_xml = "./models/mobilenet_v2.xml"
+        model_bin = "./models/mobilenet_v2.bin"
         self.core = Core()
-        self.model = self.core.read_model(model=model_path)
+        # قراءة النموذج بتمرير tuple يحتوي على مسار ملف XML ومسار ملف BIN
+        self.model = self.core.read_model(model=(model_xml, model_bin))
         self.compiled_model = self.core.compile_model(self.model, device_name="GPU")  # استخدام GPU
         self.input_layer = self.compiled_model.input(0)
         self.output_layer = self.compiled_model.output(0)
