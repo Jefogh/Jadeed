@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 import time
 import cv2
 import numpy as np
-from openvino.runtime import Core
+from openvino import Core
 from PIL import Image
 
 
@@ -27,7 +27,7 @@ class TrainedModel:
         start_time = time.time()
 
         # تحميل نموذج OpenVINO MobileNetV2 من مسار نسبي مع تضمين ملف الـ BIN
-        model_xml = "./models/mobilenet_v2.xml"
+        model_xml = "./models/mobilenet_v2.onnx"
         self.core = Core()
         # قراءة النموذج بتمرير tuple يحتوي على مسار ملف XML ومسار ملف BIN
         self.model = self.core.read_model(model=(model_xml, model_bin))
