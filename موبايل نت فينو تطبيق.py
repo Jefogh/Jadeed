@@ -28,7 +28,6 @@ class TrainedModel:
 
         # تحميل نموذج OpenVINO MobileNetV2 من مسار نسبي مع تضمين ملف الـ BIN
         model_xml = "./models/mobilenet_v2.xml"
-        model_bin = "./models/mobilenet_v2.bin"
         self.core = Core()
         # قراءة النموذج بتمرير tuple يحتوي على مسار ملف XML ومسار ملف BIN
         self.model = self.core.read_model(model=(model_xml, model_bin))
