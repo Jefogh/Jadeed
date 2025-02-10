@@ -15,11 +15,12 @@ from torchvision import models
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
+cpu_device = torch.device("cpu")
+
 # استيراد MobileNetModel من الكود السابق
 class TrainedModel:
     def __init__(self):
         start_time = time.time()
-        self.device = torch.device("cpu")  # تشغيل على CPU فقط
 
         # إنشاء نموذج MobileNetV2 بنفس البنية المستخدمة أثناء التدريب
         self.model = MobileNetModel(num_classes=30)
