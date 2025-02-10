@@ -24,9 +24,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Check Python syntax
+        run: python -m py_compile "موبايل نت فينو تطبيق.py"
+
       - name: Build executable with PyInstaller
-        run: |
-          pyinstaller --onefile "موبايل نت فينو تطبيق.py"
+        run: pyinstaller --onefile "موبايل نت فينو تطبيق.py"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
