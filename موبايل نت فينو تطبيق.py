@@ -15,24 +15,20 @@ from torchvision import models
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
-
-# تعريف الجهاز (في هذه الحالة جهاز CPU)
-cpu_device = torch.device("cpu")
-
+# استيراد MobileNetModel من الكود السابق
 class TrainedModel:
     def __init__(self):
         start_time = time.time()
-        # استخدام نموذج MobileNet V2 (FB MobileNet) بدون أوزان مسبقة
-        self.model = models.mobilenet_v2(pretrained=False)
-        # تعديل طبقة المصنف لتخرج 30 قيمة كما تم أثناء التدريب
-        in_features = self.model.classifier[1].in_features
-        self.model.classifier[1] = nn.Linear(in_features, 30)
-        # تأكد من أن المسار يشير إلى ملف النموذج المدرب (FB MobileNet)
-        model_path = "C:/Users/ccl/Desktop/fbmobilenet_trained.pth"
-        # تحميل حالة النموذج المدرب على جهاز CPU
-        self.model.load_state_dict(torch.load(model_path, map_location=cpu_device))
-        self.model = self.model.to(cpu_device)
-        self.model.eval()
+        self.device = torch.device("cpu")  # تشغيل على CPU فقط
+
+        # إنشاء نموذج MobileNetV2 بنفس البنية المستخدمة أثناء التدريب
+        self.model = MobileNetModel(num_classes=30)
+
+        # تحميل الأوزان المدربة
+        model_path = "mobilenet_trained.pth"  # تأكد من صحة المسار
+        self.model.load_state_dict(torch.load(model_path, map_location="cpu"))
+        self.model.eval()  # وضع التقييم
+
         print(f"Model loaded in {time.time() - start_time:.4f} seconds")
 
     def predict(self, img):
@@ -42,46 +38,43 @@ class TrainedModel:
         :return: tuple من (الرقم الأول, رمز العملية, الرقم الثاني)
         """
         start_time = time.time()
-        # تغيير حجم الصورة لتتوافق مع مدخلات النموذج (224x224)
-        resized_image = cv2.resize(img, (224, 224))
-        print(f"Image resizing (OpenCV) took {time.time() - start_time:.4f} seconds")
 
-        # تحويل الصورة إلى PIL مع تصحيح ترتيب القنوات (BGR -> RGB)
+        # تغيير حجم الصورة لـ 224x224 لتناسب المدخلات
+        resized_image = cv2.resize(img, (224, 224))
+
+        # تحويل الصورة إلى PIL (BGR -> RGB)
         pil_image = Image.fromarray(cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB))
-        # إعداد التحويلات (preprocessing) كما استخدم أثناء التدريب
+
+        # تجهيز التحويلات كما تم استخدامها أثناء التدريب
         preprocess = transforms.Compose([
             transforms.Grayscale(num_output_channels=3),
             transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406],  # متوسط القنوات كما في ImageNet
-                                 [0.229, 0.224, 0.225]),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
-        tensor_image = preprocess(pil_image).unsqueeze(0).to(cpu_device)
+        tensor_image = preprocess(pil_image).unsqueeze(0)  # لا حاجة لنقلها إلى الجهاز
+
         print(f"Image preprocessing took {time.time() - start_time:.4f} seconds")
 
-        start_time = time.time()
         with torch.no_grad():
-            # توقع المخرجات وإعادة تشكيلها إلى (batch_size, 30)
+            # تمرير الصورة عبر النموذج
             outputs = self.model(tensor_image).view(-1, 30)
+
         print(f"Model prediction took {time.time() - start_time:.4f} seconds")
 
-        # تقسيم المخرجات إلى ثلاث مجموعات:
-        # - أول 10 لخانة الرقم الأول
-        # - 3 لخانة العملية
-        # - الباقي للرقم الثاني
+        # تقسيم المخرجات إلى (رقم1, العملية, رقم2)
         num1_preds = outputs[:, :10]
         operation_preds = outputs[:, 10:13]
         num2_preds = outputs[:, 13:]
 
-        # الحصول على التصنيف الأعلى لكل مجموعة
+        # اختيار التوقع الأعلى لكل جزء
         _, num1_predicted = torch.max(num1_preds, 1)
         _, operation_predicted = torch.max(operation_preds, 1)
         _, num2_predicted = torch.max(num2_preds, 1)
 
-        # خريطة العمليات لتحديد رمز العملية
+        # خريطة العمليات الحسابية
         operation_map = {0: "+", 1: "-", 2: "×"}
         predicted_operation = operation_map.get(operation_predicted.item(), "?")
 
-        del tensor_image
         return num1_predicted.item(), predicted_operation, num2_predicted.item()
 
 class ExpandingCircle:
