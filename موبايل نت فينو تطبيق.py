@@ -26,7 +26,7 @@ class TrainedModel:
             nn.Linear(self.model.last_channel, 30)  # نفس عدد الفئات المستخدمة أثناء التدريب
         )
         
-        model_path = "C:/Users/ccl/Desktop/trained_model.pth"
+        model_path = "C:/Users/ccl/Desktop/mobilenet_trained.pth"
         self.model.load_state_dict(torch.load(model_path, map_location=cpu_device))  # بدون weights_only
         self.model = self.model.to(cpu_device)
         self.model.eval()
